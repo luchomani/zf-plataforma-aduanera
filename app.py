@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Plataforma Integral de Gestión Aduanera — Zona Franca
+Plataforma Integral de Gestión Aduanera — Zona Franca de Cúcuta
 ================================================================================
 Módulos: 
 1. Procesador Masivo de Declaraciones de Importación (DIM - Formulario 500)
@@ -14,7 +14,7 @@ import os
 import base64
 from datetime import datetime
 
-import fitz  # PyMuPDF para DIMs
+import fitz  # PyMuPDF para DIM
 import pdfplumber  # Para Actas de Tránsito
 import pandas as pd
 import streamlit as st
@@ -22,11 +22,11 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 # --------------------------------------------------------------------------
-# Configuración general y Estilos Corporativos con Fondo Personalizado
+# Configuración general y Estilos Corporativos Avanzados
 # --------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Plataforma Aduanera | Zona Franca",
+    page_title="Plataforma Aduanera | Zona Franca de Cúcuta",
     page_icon="🏢",
     layout="wide",
 )
@@ -38,10 +38,11 @@ if os.path.exists("Fondo ZFC.png"):
     fondo_base64 = base64.b64encode(fondo_bytes).decode()
     fondo_css = f"""
     .stApp {{
-        background-image: linear-gradient(rgba(244, 247, 246, 0.9), rgba(244, 247, 246, 0.9)), url("data:image/png;base64,{fondo_base64}");
+        background-image: linear-gradient(rgba(245, 247, 246, 0.94), rgba(245, 247, 246, 0.94)), url("data:image/png;base64,{fondo_base64}");
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
+        background-attachment: fixed;
     }}
     """
 else:
@@ -56,98 +57,111 @@ st.markdown(f"""
     :root {{
         --zf-green-dark: #1B4D3E;
         --zf-green-medium: #2C6B56;
-        --zf-olive: #8A9A28;
+        --zf-olive: #6B8E23;
         --zf-card-bg: #FFFFFF;
         --zf-text-main: #2C3E50;
+        --zf-border: #D1DCD6;
     }}
 
     {fondo_css}
 
-    h1, h2, h3 {{
+    h1, h2, h3, h4 {{
         color: var(--zf-green-dark) !important;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        font-family: 'Segoe UI', Helvetica, Arial, sans-serif;
+        font-weight: 600;
     }}
 
+    /* Contenedores tipo tarjeta corporativa */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {{
         background-color: var(--zf-card-bg);
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        border: 1px solid #E1E8E5 !important;
-        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(27, 77, 62, 0.06);
+        border: 1px solid var(--zf-border) !important;
+        padding: 24px;
     }}
 
+    /* Botones corporativos */
     .stButton>button {{
         background-color: var(--zf-green-dark);
         color: white;
-        border-radius: 6px;
+        border-radius: 4px;
         border: none;
-        font-weight: 600;
-        padding: 0.5rem 1rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
+        font-weight: 500;
+        padding: 0.5rem 1.2rem;
+        transition: background-color 0.2s ease;
     }}
 
     .stButton>button:hover {{
         background-color: var(--zf-green-medium);
         color: white;
-        border: none;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     }}
 
+    /* Métricas financieras y operativas */
     div[data-testid="stMetricValue"] {{
         color: var(--zf-green-dark);
         font-weight: 700;
+        font-size: 1.5rem;
     }}
     div[data-testid="stMetricLabel"] {{
-        color: #556B2F;
+        color: var(--zf-green-medium);
         font-weight: 600;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
     }}
 
+    /* Tablas y DataFrames */
     .stDataFrame {{
-        border-radius: 8px;
+        border-radius: 6px;
         overflow: hidden;
-        border: 1px solid #E1E8E5;
+        border: 1px solid var(--zf-border);
+    }}
+
+    /* Barra lateral */
+    [data-testid="stSidebar"] {{
+        background-color: #FFFFFF;
+        border-right: 1px solid var(--zf-border);
     }}
 </style>
 """, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------
-# Menú de Navegación Lateral (Selector de Módulos)
+# Menú de Navegación Lateral (Corporativo)
 # --------------------------------------------------------------------------
 
-st.sidebar.markdown("### 🧭 Navegación")
-st.sidebar.caption("Seleccione el Módulo Operativo:")
+if os.path.exists("LOGO ZFS-ZFC.jpeg"):
+    st.sidebar.image("LOGO ZFS-ZFC.jpeg", use_container_width=True)
+
+st.sidebar.markdown("### Navegación Operativa")
+st.sidebar.caption("Seleccione el módulo de gestión:")
 
 modulo_seleccionado = st.sidebar.radio(
     "Portal:",
     [
-        "📑 Procesador de DIM",
-        "📋 Actas de Tránsito / PICIZ"
+        "Procesador de DIM",
+        "Actas de Tránsito / PICIZ"
     ],
     label_visibility="collapsed"
 )
 
 st.sidebar.divider()
-
-# Carga de Logo en Sidebar o Cabecera
-logo_path = None
-for filename in ["LOGO ZFS-ZFC.jpeg", "logo.jpeg", "logo.jpg", "logo.png"]:
-    if os.path.exists(filename):
-        logo_path = filename
-        break
-
-if logo_path:
-    st.sidebar.image(logo_path, width=200)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Zona Franca de Cúcuta**  \nOperada por Zona Franca Santander")
+st.sidebar.markdown(
+    """
+    <div style="font-size: 0.8rem; color: #555; text-align: center; line-height: 1.4;">
+        <b>Zona Franca de Cúcuta</b><br>
+        Operada por Zona Franca Santander<br>
+        <i>Sistema de Automatización Aduanera</i>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # ==========================================================================
-# MÓDULO 1: PROCESADOR DE DIM (Declaraciones de Importación)
+# MÓDULO 1: PROCESADOR DE DIM (Declaración de Importación)
 # ==========================================================================
 
-if modulo_seleccionado == "📑 Procesador de DIM":
+if modulo_seleccionado == "Procesador de DIM":
     
     COLUMNAS_DIM = [
         "Número de formulario",
@@ -328,8 +342,8 @@ if modulo_seleccionado == "📑 Procesador de DIM":
             "Campos_no_encontrados": ", ".join(faltantes) if faltantes else "",
         }
 
-    st.markdown("### 📑 Módulo de Declaraciones de Importación (DIM)")
-    st.markdown("**Procesador Masivo — Formulario 500 DIAN**")
+    st.markdown("### Procesador de Declaración de Importación (DIM)")
+    st.markdown("Módulo automatizado para la extracción y consolidación de datos del Formulario 500.")
     st.divider()
 
     if "df_resultado_dim" not in st.session_state:
@@ -338,9 +352,9 @@ if modulo_seleccionado == "📑 Procesador de DIM":
         st.session_state.uploader_key_dim = 0
 
     with st.container():
-        st.subheader("1. Carga de Documentación DIM")
+        st.subheader("Carga de Documentación")
         uploaded_files_dim = st.file_uploader(
-            "Arrastra archivos PDF o paquetes .ZIP con DIMs",
+            "Seleccione o arrastre archivos en formato PDF o paquetes comprimidos ZIP con DIM",
             type=["pdf", "zip"],
             accept_multiple_files=True,
             key=f"dim_uploader_{st.session_state.uploader_key_dim}",
@@ -348,9 +362,9 @@ if modulo_seleccionado == "📑 Procesador de DIM":
 
         col_b1, col_b2 = st.columns(2)
         with col_b1:
-            procesar_dim_btn = st.button("🚀 Procesar DIMs", type="primary", use_container_width=True)
+            procesar_dim_btn = st.button("Procesar DIM", type="primary", use_container_width=True)
         with col_b2:
-            limpiar_dim_btn = st.button("🧹 Limpiar Panel DIM", use_container_width=True)
+            limpiar_dim_btn = st.button("Restablecer Panel", use_container_width=True)
 
     if limpiar_dim_btn:
         st.session_state.df_resultado_dim = pd.DataFrame(columns=COLUMNAS_DIM)
@@ -359,9 +373,9 @@ if modulo_seleccionado == "📑 Procesador de DIM":
 
     if procesar_dim_btn:
         if not uploaded_files_dim:
-            st.warning("Por favor carga al menos un archivo PDF o ZIP.")
+            st.warning("Debe cargar al menos un archivo PDF o un archivo comprimido ZIP.")
         else:
-            progreso = st.progress(0.0, text="Iniciando motor de extracción DIM...")
+            progreso = st.progress(0.0, text="Inicializando motor de extracción...")
             tareas = []
             for uf in uploaded_files_dim:
                 contenido = uf.read()
@@ -389,7 +403,7 @@ if modulo_seleccionado == "📑 Procesador de DIM":
                     fila["Archivo"] = nombre_pdf
                     fila["Campos_no_encontrados"] = f"ERROR: {exc}"
                     filas.append(fila)
-                progreso.progress(i / total, text=f"Procesando: {nombre_pdf}")
+                progreso.progress(i / total, text=f"Procesando documento: {nombre_pdf}")
 
             progreso.empty()
             df_res = pd.DataFrame(filas, columns=COLUMNAS_DIM)
@@ -401,20 +415,20 @@ if modulo_seleccionado == "📑 Procesador de DIM":
                 df_res["Levante No."] = df_res["Levante No."].astype(str).str.strip()
 
             st.session_state.df_resultado_dim = df_res
-            st.success(f"✅ Extracción exitosa. {len(df_res)} declaración(es) consolidada(s).")
+            st.success(f"Proceso completado satisfactoriamente. Se han consolidado {len(df_res)} registros de DIM.")
 
     df_dim = st.session_state.df_resultado_dim
     if not df_dim.empty:
         st.markdown("---")
-        st.subheader("2. Analítica y Consolidado DIM")
+        st.subheader("Consolidado y Analítica de DIM")
         cols_m = st.columns(4)
-        cols_m[0].metric("Total Valor FOB (USD)", f"${df_dim['Valor FOB (USD)'].sum():,.2f}")
-        cols_m[1].metric("Total Fletes/Seguros", f"${df_dim['Sumatoria Fletes/Seguros/Otros (USD)'].sum():,.2f}")
-        cols_m[2].metric("Peso Bruto (Kgs)", f"{df_dim['Peso Bruto (Kgs)'].sum():,.2f}")
-        cols_m[3].metric("Peso Neto (Kgs)", f"{df_dim['Peso Neto (Kgs)'].sum():,.2f}")
+        cols_m[0].metric("Valor Total FOB (USD)", f"${df_dim['Valor FOB (USD)'].sum():,.2f}")
+        cols_m[1].metric("Fletes y Seguros", f"${df_dim['Sumatoria Fletes/Seguros/Otros (USD)'].sum():,.2f}")
+        cols_m[2].metric("Peso Bruto Total (Kgs)", f"{df_dim['Peso Bruto (Kgs)'].sum():,.2f}")
+        cols_m[3].metric("Peso Neto Total (Kgs)", f"{df_dim['Peso Neto (Kgs)'].sum():,.2f}")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        busq_dim = st.text_input("🔍 Buscar en DIMs (Formulario, NIT, Importador...)", "")
+        busq_dim = st.text_input("Búsqueda de registros en DIM (Formulario, NIT, Importador...)", "")
         df_vista_dim = df_dim.copy()
         if busq_dim:
             mask = df_vista_dim.apply(lambda f: f.astype(str).str.contains(busq_dim, case=False, na=False).any(), axis=1)
@@ -423,10 +437,9 @@ if modulo_seleccionado == "📑 Procesador de DIM":
         st.dataframe(df_vista_dim, use_container_width=True, height=400)
 
         st.markdown("---")
-        st.subheader("3. Exportación de DIMs")
+        st.subheader("Exportación de Datos")
         df_exp_dim = df_dim.drop(columns=["Campos_no_encontrados"])
         
-        # Excel generator para DIM
         def generar_excel_dim(dframe):
             buf = io.BytesIO()
             df_ex = dframe.copy()
@@ -468,16 +481,16 @@ if modulo_seleccionado == "📑 Procesador de DIM":
 
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            st.download_button("⬇️ Descargar Excel DIM", data=generar_excel_dim(df_exp_dim), file_name=f"dim_zona_franca_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button("Descargar Libro Excel (DIM)", data=generar_excel_dim(df_exp_dim), file_name=f"DIM_Zona_Franca_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with col_d2:
-            st.download_button("⬇️ Descargar CSV DIM", data=df_exp_dim.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"), file_name=f"dim_zona_franca_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("Descargar Formato CSV (DIM)", data=df_exp_dim.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"), file_name=f"DIM_Zona_Franca_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv", use_container_width=True)
 
 
 # ==========================================================================
 # MÓDULO 2: ACTAS DE TRÁNSITO / PICIZ
 # ==========================================================================
 
-elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
+elif modulo_seleccionado == "Actas de Tránsito / PICIZ":
 
     def extraer_datos_acta(pdf_file, nombre_archivo):
         with pdfplumber.open(pdf_file) as pdf:
@@ -526,8 +539,8 @@ elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
             "Archivo": nombre_archivo,
         }
 
-    st.markdown("### 📋 Módulo de Actas de Tránsito / PICIZ")
-    st.markdown("**Extractor Automático de Actas de Inventario e Inconsistencias**")
+    st.markdown("### Actas de Tránsito / PICIZ")
+    st.markdown("Extractor automatizado de actas de inventario e inconsistencias para operaciones de tránsito aduanero.")
     st.divider()
 
     if "df_resultado_actas" not in st.session_state:
@@ -536,9 +549,9 @@ elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
         st.session_state.uploader_key_actas = 0
 
     with st.container():
-        st.subheader("1. Carga de Documentación de Actas")
+        st.subheader("Carga de Documentación de Actas")
         uploaded_files_actas = st.file_uploader(
-            "Carga archivos PDF de actas de inventario",
+            "Seleccione los archivos PDF correspondientes a las actas de inventario",
             type=["pdf"],
             accept_multiple_files=True,
             key=f"actas_uploader_{st.session_state.uploader_key_actas}",
@@ -546,9 +559,9 @@ elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
 
         col_a1, col_a2 = st.columns(2)
         with col_a1:
-            procesar_actas_btn = st.button("🚀 Procesar Actas", type="primary", use_container_width=True)
+            procesar_actas_btn = st.button("Procesar Actas", type="primary", use_container_width=True)
         with col_a2:
-            limpiar_actas_btn = st.button("🧹 Limpiar Panel Actas", use_container_width=True)
+            limpiar_actas_btn = st.button("Restablecer Panel", use_container_width=True)
 
     if limpiar_actas_btn:
         st.session_state.df_resultado_actas = pd.DataFrame()
@@ -557,18 +570,18 @@ elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
 
     if procesar_actas_btn:
         if not uploaded_files_actas:
-            st.warning("Por favor carga al menos un archivo PDF de actas.")
+            st.warning("Debe cargar al menos un archivo PDF de actas.")
         else:
-            with st.spinner("Extrayendo campos clave de actas de tránsito..."):
+            with st.spinner("Extrayendo campos clave de las actas de tránsito..."):
                 datos = [extraer_datos_acta(f, f.name) for f in uploaded_files_actas]
                 st.session_state.df_resultado_actas = pd.DataFrame(datos)
-            st.success(f"✅ Extracción completada para {len(uploaded_files_actas)} acta(s).")
+            st.success(f"Proceso completado para {len(uploaded_files_actas)} acta(s).")
 
     df_actas = st.session_state.df_resultado_actas
     if not df_actas.empty:
         st.markdown("---")
-        st.subheader("2. Resultados Consolidados de Actas")
-        busq_actas = st.text_input("🔍 Buscar en Actas (Usuario, Tránsito, Acta PICIZ...)", "")
+        st.subheader("Resultados Consolidados de Actas")
+        busq_actas = st.text_input("Búsqueda de registros en Actas (Usuario, Tránsito, Acta PICIZ...)", "")
         df_vista_actas = df_actas.copy()
         if busq_actas:
             mask = df_vista_actas.apply(lambda f: f.astype(str).str.contains(busq_actas, case=False, na=False).any(), axis=1)
@@ -577,7 +590,7 @@ elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
         st.dataframe(df_vista_actas, use_container_width=True, height=430)
 
         st.markdown("---")
-        st.subheader("3. Exportación de Actas")
+        st.subheader("Exportación de Datos")
         
         def generar_excel_actas(dframe):
             buf = io.BytesIO()
@@ -604,6 +617,6 @@ elif modulo_seleccionado == "📋 Actas de Tránsito / PICIZ":
 
         col_e1, col_e2 = st.columns(2)
         with col_e1:
-            st.download_button("⬇️ Descargar Excel Actas", data=generar_excel_actas(df_actas), file_name=f"actas_zona_franca_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.download_button("Descargar Libro Excel (Actas)", data=generar_excel_actas(df_actas), file_name=f"Actas_Zona_Franca_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with col_e2:
-            st.download_button("⬇️ Descargar CSV Actas", data=df_actas.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"), file_name=f"actas_zona_franca_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv", use_container_width=True)
+            st.download_button("Descargar Formato CSV (Actas)", data=df_actas.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"), file_name=f"Actas_Zona_Franca_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", mime="text/csv", use_container_width=True)
