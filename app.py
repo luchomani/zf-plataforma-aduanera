@@ -15,10 +15,10 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 # ==========================================
-# CARGA DINÁMICA DEL LOGO (FAVICON) - OPCIÓN RECOMENDADA
+# 1. CARGA DEL ÍCONO PESTAÑA NAVEGADOR (FAVICON)
 # ==========================================
 icono_pagina = "🏢"
-archivos_logo_posibles = [
+archivos_favicon = [
     "LOGO SANTANDER.jpg",
     "LOGO ZFS-ZFC.jpeg",
     "logo.jpeg",
@@ -27,7 +27,7 @@ archivos_logo_posibles = [
     "favicon.ico"
 ]
 
-for archivo in archivos_logo_posibles:
+for archivo in archivos_favicon:
     if os.path.exists(archivo):
         try:
             icono_pagina = Image.open(archivo)
@@ -36,7 +36,7 @@ for archivo in archivos_logo_posibles:
             pass
 
 # ==========================================
-# CONFIGURACIÓN GENERAL Y ESTILOS CORPORATIVOS
+# 2. CONFIGURACIÓN GENERAL Y ESTILOS
 # ==========================================
 st.set_page_config(
     page_title="Sistema de Automatización Aduanera | Zona Franca",
@@ -120,14 +120,25 @@ THIN_BORDER = Border(
     bottom=Side(style="thin", color="D9D9D9")
 )
 
-# --- NAVEGACIÓN EN LA BARRA LATERAL ---
+# ==========================================
+# 3. NAVEGACIÓN EN LA BARRA LATERAL (LOGO DUAL ZFS-ZFC)
+# ==========================================
 with st.sidebar:
+    archivos_logo_sidebar = [
+        "LOGO ZFS-ZFC.jpeg",
+        "LOGO ZFS-ZFC.jpg",
+        "LOGO ZFS-ZFC.png",
+        "LOGO SANTANDER.jpg",
+        "logo.jpeg"
+    ]
+    
     logo_encontrado = False
-    for filename in archivos_logo_posibles:
-        if os.path.exists(filename) and filename != "favicon.ico":
+    for filename in archivos_logo_sidebar:
+        if os.path.exists(filename):
             st.image(filename, use_container_width=True)
             logo_encontrado = True
             break
+            
     if not logo_encontrado:
         st.markdown("<h3 style='color: #12402A; text-align: center;'>ZONA FRANCA</h3>", unsafe_allow_html=True)
 
