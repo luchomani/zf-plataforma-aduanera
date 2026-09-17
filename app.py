@@ -229,16 +229,17 @@ if modulo_seleccionado == "Procesador de DIM":
         return None
 
     def dividir_dims(texto: str):
-        partes = re.split(r"(?=Declaraci[oó]n de Importaci[oó]n)", texto, flags=re.IGNORECASE)
-        return [p for p in partes if re.search(r"N[uú]mero de formulario", p, re.IGNORECASE)]
+        # Separa exactamente por el encabezado principal de cada declaración
+        partes = re.split(r"(?i)(?=Declaraci[oó]n\s+de\s+Importaci[oó]n|4\s*\.\s*N[uú]mero\s+de\s+formulario)", texto)
+        chunks = [p for p in partes if re.search(r"4\s*\.\s*N[uú]mero\s+de\s+formulario", p, re.IGNORECASE) or re.search(r"Declaraci[oó]n\s+de\s+Importaci[oó]n", p, re.IGNORECASE)]
+        return chunks if chunks else [texto]
 
-    def extraer_campos_dim(chunk_texto: str, texto_completo: str, nombre_archivo: str) -> dict:
+    def extraer_campos_dim(chunk_texto: str, nombre_archivo: str) -> dict:
         faltantes = []
 
+        # Búsqueda estrictamente aislada en el chunk del documento
         def campo(nombre, patron, grupo=1, default=""):
             valor = _buscar_dim(patron, chunk_texto, grupo=grupo)
-            if not valor:
-                valor = _buscar_dim(patron, texto_completo, grupo=grupo)
             if not valor:
                 faltantes.append(nombre)
                 return default
@@ -247,7 +248,7 @@ if modulo_seleccionado == "Procesador de DIM":
         numero_formulario = campo("Número de formulario", r"4\s*\.\s*N[uú]mero de formulario\s*\n?\s*(\S+)")
         nit_importador = campo("NIT Importador", r"5\s*\.\s*N[uú]mero de Identificaci[oó]n Tributaria \(NIT\)\s*(\d{9,10})")
         razon_social = campo("Razón Social Importador", r"11\s*\.\s*Apellidos y nombres o Raz[oó]n Social\s*([^\n]+)")
-        factura = campo("Factura", r"51\s*\.\s*No\.\s*de\s*factura\s*\n\s*(\S+)")
+        factura = campo("Factura", r"51\s*\.\s*No\.\s*de\s*factura\s*\n?\s*(\S+)")
         
         manifiesto_carga = campo("Manifiesto de carga", r"42\s*\.?\s*Manifiesto\s+de\s+carga\s*(?:No\.?\s*)?([A-Za-z0-9\-]+)")
         if not manifiesto_carga:
@@ -287,16 +288,17 @@ if modulo_seleccionado == "Procesador de DIM":
             no_bultos = 0
 
         acta_inspeccion = ""
-        m_acta = re.search(r"ACTA\s+DE\s+INSPECCI[OÓ]N\s*(?:No\.?|Número)?\s*[:\.]?\s*([0-9]{8,15})", texto_completo, re.IGNORECASE)
+        m_acta = re.search(r"ACTA\s+DE\s+INSPECCI[OÓ]N\s*(?:No\.?|Número)?\s*[:\.]?\s*([0-9]{8,15})", chunk_texto, re.IGNORECASE)
         if m_acta:
             acta_inspeccion = m_acta.group(1).strip()
 
+        # Búsqueda aislada de Levante dentro del chunk específico
         levante_no = ""
         m_lev_box = re.search(r"134\.?\s*Levante\s+No\.?\s*([0-9]{8,15})", chunk_texto, re.IGNORECASE)
         if m_lev_box:
             levante_no = m_lev_box.group(1).strip()
         if not levante_no:
-            m_lev_gen = re.search(r"(?:Levante|Auto(?:rización)?)\s*(?:No\.?|Número)?\s*[:\.]?\s*([0-9]{8,15})", texto_completo, re.IGNORECASE)
+            m_lev_gen = re.search(r"(?:Levante|Auto(?:rizaci[oó]n)?)\s*(?:No\.?|N[úu]mero)?\s*[:\.]?\s*([0-9]{8,15})", chunk_texto, re.IGNORECASE)
             if m_lev_gen:
                 levante_no = m_lev_gen.group(1).strip()
         if not levante_no:
@@ -304,7 +306,7 @@ if modulo_seleccionado == "Procesador de DIM":
 
         fecha_levante = campo("Fecha del Levante", r"135\.?\s*Fecha[^\d\n]*(\d{4}\s*[-/\.]\s*\d{2}\s*[-/\.]\s*\d{2})")
         if not fecha_levante:
-            m_fec = re.search(r"\b(20\d{2}[-/\.](?:0[1-9]|1[0-2])[-/\.](?:0[1-9]|[12]\d|3[01]))\b", texto_completo)
+            m_fec = re.search(r"\b(20\d{2}[-/\.](?:0[1-9]|1[0-2])[-/\.](?:0[1-9]|[12]\d|3[01]))\b", chunk_texto)
             if m_fec:
                 fecha_levante = m_fec.group(1)
                 if "Fecha del Levante" in faltantes:
@@ -394,10 +396,8 @@ if modulo_seleccionado == "Procesador de DIM":
                     with fitz.open(stream=data, filetype="pdf") as doc:
                         texto_completo = "\n".join(page.get_text() for page in doc)
                     dim_chunks = dividir_dims(texto_completo)
-                    if not dim_chunks:
-                        dim_chunks = [texto_completo]
                     for chunk in dim_chunks:
-                        filas.append(extraer_campos_dim(chunk, texto_completo, nombre_pdf))
+                        filas.append(extraer_campos_dim(chunk, nombre_pdf))
                 except Exception as exc:
                     fila = {c: "" for c in COLUMNAS_DIM}
                     fila["Archivo"] = nombre_pdf
@@ -410,9 +410,7 @@ if modulo_seleccionado == "Procesador de DIM":
             if "Número de formulario" in df_res.columns:
                 df_res["Número de formulario"] = df_res["Número de formulario"].astype(str).str.strip()
                 df_res = df_res[df_res["Número de formulario"].notna() & (df_res["Número de formulario"] != "") & (df_res["Número de formulario"].str.lower() != "nan")]
-                df_res = df_res.drop_duplicates(subset=["Número de formulario"], keep="last").reset_index(drop=True)
-            if "Levante No." in df_res.columns:
-                df_res["Levante No."] = df_res["Levante No."].astype(str).str.strip()
+                df_res = df_res.drop_duplicates(subset=["Número de formulario", "Levante No."], keep="last").reset_index(drop=True)
 
             st.session_state.df_resultado_dim = df_res
             st.success(f"Proceso completado satisfactoriamente. Se han consolidado {len(df_res)} registros de DIM.")
@@ -492,30 +490,33 @@ if modulo_seleccionado == "Procesador de DIM":
 
 elif modulo_seleccionado == "Actas de Tránsito / PICIZ":
 
-    def extraer_datos_acta(pdf_file, nombre_archivo):
-        with pdfplumber.open(pdf_file) as pdf:
-            texto = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+    def dividir_actas(texto: str):
+        # Divide el documento si se detectan múltiples encabezados de actas en un solo archivo PDF
+        partes = re.split(r"(?i)(?=ACTA\s+DE\s+(?:DESPRECINTAJE|INSPECCI[OÓ]N|INVENTARIO)|Acta\s+N\.?\s*\d+)", texto)
+        chunks = [p for p in partes if re.search(r"Acta\s+N\.?|DESPRECINTAJE|INVENTARIO|DECLARACION\s+DE\s+TRANSITO", p, re.IGNORECASE)]
+        return chunks if chunks else [texto]
 
-        usuario = re.search(r"consignados?\s+al\s*\n?\s*([A-Z0-9\.\-\s]+?)(?=\s+y\s+amparado|\s+DECLARACION|\n\s*DECLARACION|$)", texto, re.IGNORECASE)
+    def extraer_datos_acta_chunk(texto_chunk, nombre_archivo):
+        usuario = re.search(r"consignados?\s+al\s*\n?\s*([A-Z0-9\.\-\s]+?)(?=\s+y\s+amparado|\s+DECLARACION|\n\s*DECLARACION|$)", texto_chunk, re.IGNORECASE)
         val_usuario = " ".join(usuario.group(1).strip().split()) if usuario else "N/A"
 
-        doc_form = re.search(r"DOCUMENTO\s+FORMULARIO\s+MERCANC[ÍI]A[\s\S]*?\n\s*([A-Z0-9\.\-_]+)\s+(\d+)", texto, re.IGNORECASE)
+        doc_form = re.search(r"DOCUMENTO\s+FORMULARIO\s+MERCANC[ÍI]A[\s\S]*?\n\s*([A-Z0-9\.\-_]+)\s+(\d+)", texto_chunk, re.IGNORECASE)
         if not doc_form:
-            doc_form = re.search(r"\b([A-Z0-9\.\-_]{5,})\s+(\d{7,10})\b", texto)
+            doc_form = re.search(r"\b([A-Z0-9\.\-_]{5,})\s+(\d{7,10})\b", texto_chunk)
 
-        transito = re.search(r"DECLARACION\s+DE\s+TRANSITO\s+ADUANERO\s*\n?\s*(?:Número|N[úu]mero)?\s*[:\.]?\s*(\d+)", texto, re.IGNORECASE)
-        fecha_ingreso = re.search(r"ACTA\s+DE\s+DESPRECINTAJE[\s\S]*?(\d{2}/\d{2}/\d{4})", texto, re.IGNORECASE)
-        fecha_auto = re.search(r"Fecha\s+de\s+la\s+autorizaci[oó]n\s+de\s+la\s+operaci[oó]n[^\d]*(\d{4}[-/]\d{2}[-/]\d{2})", texto, re.IGNORECASE)
-        fecha_limite = re.search(r"Fecha\s+l[ií]mite\s+para\s+finalizar\s+el\s+r[eé]gimen[^\d]*(\d{4}[-/]\d{2}[-/]\d{2})", texto, re.IGNORECASE)
-        acta_n = re.search(r"Acta\s+N\.?\s*(\d+)", texto, re.IGNORECASE)
+        transito = re.search(r"DECLARACION\s+DE\s+TRANSITO\s+ADUANERO\s*\n?\s*(?:Número|N[úu]mero)?\s*[:\.]?\s*(\d+)", texto_chunk, re.IGNORECASE)
+        fecha_ingreso = re.search(r"ACTA\s+DE\s+DESPRECINTAJE[\s\S]*?(\d{2}/\d{2}/\d{4})", texto_chunk, re.IGNORECASE)
+        fecha_auto = re.search(r"Fecha\s+de\s+la\s+autorizaci[oó]n\s+de\s+la\s+operaci[oó]n[^\d]*(\d{4}[-/]\d{2}[-/]\d{2})", texto_chunk, re.IGNORECASE)
+        fecha_limite = re.search(r"Fecha\s+l[ií]mite\s+para\s+finalizar\s+el\s+r[eé]gimen[^\d]*(\d{4}[-/]\d{2}[-/]\d{2})", texto_chunk, re.IGNORECASE)
+        acta_n = re.search(r"Acta\s+N\.?\s*(\d+)", texto_chunk, re.IGNORECASE)
         
-        fecha_acta_match = re.search(r"FECHA\s+GENERACI[OÓ]N\s+DEL\s+ACTA:\s*(\d{2}/\d{2}/\d{4})", texto, re.IGNORECASE)
+        fecha_acta_match = re.search(r"FECHA\s+GENERACI[OÓ]N\s+DEL\s+ACTA:\s*(\d{2}/\d{2}/\d{4})", texto_chunk, re.IGNORECASE)
         fecha_acta = fecha_acta_match.group(1).strip() if fecha_acta_match else "N/A"
 
-        peso_match = re.search(r"TOTALES\s*:\s*[\d\.,]+\s+([\d\.,]+)", texto, re.IGNORECASE) or re.search(r"TOTALES\s*:\s*([\d\.,]+)", texto, re.IGNORECASE)
+        peso_match = re.search(r"TOTALES\s*:\s*[\d\.,]+\s+([\d\.,]+)", texto_chunk, re.IGNORECASE) or re.search(r"TOTALES\s*:\s*([\d\.,]+)", texto_chunk, re.IGNORECASE)
         peso_bascula = peso_match.group(1).strip() if peso_match else "N/A"
 
-        obs_match = re.search(r"Observaciones[\s\S]*?\n([\s\S]*?)(?=\n\s*(?:DOCUMENTO|TOTALES|USUARIO\s+OPERADOR|FECHA\s+GENERACI|\Z))", texto, re.IGNORECASE)
+        obs_match = re.search(r"Observaciones[\s\S]*?\n([\s\S]*?)(?=\n\s*(?:DOCUMENTO|TOTALES|USUARIO\s+OPERADOR|FECHA\s+GENERACI|\Z))", texto_chunk, re.IGNORECASE)
         if obs_match:
             lineas = obs_match.group(1).split("\n")
             lineas_limpias = [l.strip() for l in lineas if l.strip() and not re.match(r"^(Descripción\s*N/A|Bultos|Estado|Términos|Otra)\b", l.strip(), re.IGNORECASE)]
@@ -551,8 +552,8 @@ elif modulo_seleccionado == "Actas de Tránsito / PICIZ":
     with st.container():
         st.subheader("Carga de Documentación de Actas")
         uploaded_files_actas = st.file_uploader(
-            "Seleccione los archivos PDF correspondientes a las actas de inventario",
-            type=["pdf"],
+            "Seleccione o arrastre archivos en formato PDF o paquetes comprimidos ZIP con Actas",
+            type=["pdf", "zip"],
             accept_multiple_files=True,
             key=f"actas_uploader_{st.session_state.uploader_key_actas}",
         )
@@ -570,12 +571,52 @@ elif modulo_seleccionado == "Actas de Tránsito / PICIZ":
 
     if procesar_actas_btn:
         if not uploaded_files_actas:
-            st.warning("Debe cargar al menos un archivo PDF de actas.")
+            st.warning("Debe cargar al menos un archivo PDF o ZIP de actas.")
         else:
             with st.spinner("Extrayendo campos clave de las actas de tránsito..."):
-                datos = [extraer_datos_acta(f, f.name) for f in uploaded_files_actas]
-                st.session_state.df_resultado_actas = pd.DataFrame(datos)
-            st.success(f"Proceso completado para {len(uploaded_files_actas)} acta(s).")
+                tareas_actas = []
+                for uf in uploaded_files_actas:
+                    contenido = uf.read()
+                    if uf.name.lower().endswith(".zip"):
+                        with zipfile.ZipFile(io.BytesIO(contenido)) as zf:
+                            for info in zf.infolist():
+                                if info.filename.lower().endswith(".pdf") and not info.is_dir():
+                                    tareas_actas.append((info.filename.split("/")[-1], zf.read(info.filename)))
+                    else:
+                        tareas_actas.append((uf.name, contenido))
+
+                datos_actas = []
+                for nombre_pdf, data_bytes in tareas_actas:
+                    try:
+                        with pdfplumber.open(io.BytesIO(data_bytes)) as pdf:
+                            texto_completo = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+                        
+                        chunks_actas = dividir_actas(texto_completo)
+                        for chunk in chunks_actas:
+                            datos_actas.append(extraer_datos_acta_chunk(chunk, nombre_pdf))
+                    except Exception as exc:
+                        datos_actas.append({
+                            "Usuario": "N/A",
+                            "Documento de transporte": "N/A",
+                            "Transito N°": "N/A",
+                            "FMM N°": "N/A",
+                            "FECHA INGRESO ÚLTIMO VEHÍCULO": "N/A",
+                            "Fecha de autorización": "N/A",
+                            "Tránsito Fecha Maxima Finalización": "N/A",
+                            "Acta de Inventario e Inconsistencias PICIZ": "N/A",
+                            "Fecha acta de inventario e inconsistencias": "N/A",
+                            "No. Planilla de Recepción (FECHA)": "N/A",
+                            "Peso Báscula ZFC": "N/A",
+                            "OBSERVACIONES/ INCONSISTENCIAS": f"ERROR: {exc}",
+                            "Archivo": nombre_pdf,
+                        })
+
+                df_actas_res = pd.DataFrame(datos_actas)
+                if not df_actas_res.empty and "Acta de Inventario e Inconsistencias PICIZ" in df_actas_res.columns:
+                    df_actas_res = df_actas_res.drop_duplicates(subset=["Acta de Inventario e Inconsistencias PICIZ", "Transito N°"], keep="last").reset_index(drop=True)
+
+                st.session_state.df_resultado_actas = df_actas_res
+            st.success(f"Proceso completado para {len(df_actas_res)} registro(s) de actas.")
 
     df_actas = st.session_state.df_resultado_actas
     if not df_actas.empty:
