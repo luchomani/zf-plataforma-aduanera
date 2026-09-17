@@ -9,16 +9,38 @@ import pdfplumber
 import pandas as pd
 import numpy as np
 import streamlit as st
+from PIL import Image
 from io import BytesIO
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+
+# ==========================================
+# CARGA DINÁMICA DEL LOGO (FAVICON) - OPCIÓN RECOMENDADA
+# ==========================================
+icono_pagina = "🏢"
+archivos_logo_posibles = [
+    "LOGO SANTANDER.jpg",
+    "LOGO ZFS-ZFC.jpeg",
+    "logo.jpeg",
+    "logo.jpg",
+    "logo.png",
+    "favicon.ico"
+]
+
+for archivo in archivos_logo_posibles:
+    if os.path.exists(archivo):
+        try:
+            icono_pagina = Image.open(archivo)
+            break
+        except Exception:
+            pass
 
 # ==========================================
 # CONFIGURACIÓN GENERAL Y ESTILOS CORPORATIVOS
 # ==========================================
 st.set_page_config(
     page_title="Sistema de Automatización Aduanera | Zona Franca",
-    page_icon="🏢",
+    page_icon=icono_pagina,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -101,8 +123,8 @@ THIN_BORDER = Border(
 # --- NAVEGACIÓN EN LA BARRA LATERAL ---
 with st.sidebar:
     logo_encontrado = False
-    for filename in ["LOGO ZFS-ZFC.jpeg", "logo.jpeg", "logo.jpg", "logo.png"]:
-        if os.path.exists(filename):
+    for filename in archivos_logo_posibles:
+        if os.path.exists(filename) and filename != "favicon.ico":
             st.image(filename, use_container_width=True)
             logo_encontrado = True
             break
