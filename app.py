@@ -618,119 +618,230 @@ def modulo_control_bloqueos():
     with st.sidebar:
         st.markdown("<hr style='margin: 10px 0; border: 1px solid #D1D5DB;'>", unsafe_allow_html=True)
         st.markdown("### Configuración Operativa")
-        
+
         fecha_actual_input = st.date_input(
             "Fecha Actual de Referencia",
-            value=st.session_state.fecha_ref
+            value=st.session_state.fecha_ref,
+            key="fecha_ref_bloqueos"
         )
         st.session_state.fecha_ref = fecha_actual_input
 
         st.markdown("---")
-        uploaded_file = st.file_uploader("Cargar Reporte PW (Excel)", type=["xlsx", "xls"], key="uploader_bloqueos")
-        
+        uploaded_file = st.file_uploader(
+            "Cargar Reporte PW (Excel)",
+            type=["xlsx", "xls"],
+            key="uploader_bloqueos"
+        )
+
         st.markdown("---")
         if st.button("Limpiar Datos y Sesión", use_container_width=True, key="btn_clean_bloqueos"):
             st.session_state.file_processed = False
             st.session_state.df_final_bloqueos = None
             st.rerun()
 
+    # --- PROCESAMIENTO DEL ARCHIVO ---
     if uploaded_file is not None:
         try:
             with st.spinner("Procesando registros aduaneros..."):
                 df_raw = pd.read_excel(uploaded_file, header=None, dtype=str)
-                
+
+                # Localizar cabeceras
                 header_row_index = -1
                 for i, row in df_raw.iterrows():
                     row_str = " ".join(str(val) for val in row.values)
                     if "NOMBRE COMPANIA" in row_str or "PLACA" in row_str:
                         header_row_index = i
                         break
-                
+
                 if header_row_index == -1:
                     st.error("No se localizó la fila de encabezados estándar en el archivo cargado.")
                     st.stop()
-                
+
                 df = pd.read_excel(uploaded_file, header=header_row_index, dtype=str)
-                df.columns = df.columns.str.strip().str.replace(r'\r\n', '', regex=True)
-                
+                df.columns = (
+                    df.columns.astype(str)
+                    .str.strip()
+                    .str.replace(r'[\r\n]+', ' ', regex=True)
+                    .str.replace(r'\s+', ' ', regex=True)
+                )
+
+                # Mapeo de columnas (INCLUYE COMENTARIO, DOCUMENTO DE TRANSPORTE, ESTADO PLANILLA)
                 columnas_esperadas = {
                     'NOMBRE COMPANIA': 'Compañía Usuaria',
                     'PLACA': 'Placa',
                     'FECHA REGISTRO': 'Fecha Registro',
-                    'TIPO INGRESO': 'Tipo Ingreso', 
+                    'FECHA BASCULA': 'Fecha de Báscula',
+                    'TIPO INGRESO': 'Tipo Ingreso',
                     'NUM DEL DOC. ADUANERO': 'Número Documento',
+                    'DOCUMENTO DE TRANSPORTE': 'Documento Transporte',
                     'TRANSITO': 'Tránsito',
-                    'FECHA BASCULA': 'Fecha de Báscula'
+                    'ESTADO PLANILLA': 'Estado Planilla',
+                    'COMENTARIO': 'Comentario'
                 }
-                
+
                 columnas_existentes = {k: v for k, v in columnas_esperadas.items() if k in df.columns}
                 df_filtrado = df[list(columnas_existentes.keys())].rename(columns=columnas_existentes)
-                
+
+                # Filtro: FORMULARIO + OTROS INGRESOS
                 if 'Tipo Ingreso' in df_filtrado.columns:
-                    df_filtrado = df_filtrado[df_filtrado['Tipo Ingreso'].str.contains('FORMULARIO', na=False, case=False)]
-                    df_filtrado = df_filtrado.drop(columns=['Tipo Ingreso'])
-                
+                    tipos_validos = ['FORMULARIO', 'OTROS INGRESOS']
+                    df_filtrado['Tipo Ingreso'] = (
+                        df_filtrado['Tipo Ingreso'].astype(str).str.upper().str.strip()
+                    )
+                    df_filtrado = df_filtrado[df_filtrado['Tipo Ingreso'].isin(tipos_validos)]
+
+                # Limpieza básica
                 df_filtrado = df_filtrado.dropna(subset=['Placa'])
                 df_filtrado['Placa'] = df_filtrado['Placa'].astype(str).str.strip()
                 df_filtrado = df_filtrado[df_filtrado['Placa'] != '']
 
-                for col in ['Número Documento', 'Tránsito']:
+                for col in ['Número Documento', 'Tránsito', 'Documento Transporte']:
                     if col in df_filtrado.columns:
                         df_filtrado[col] = df_filtrado[col].apply(limpiar_numeros)
 
                 for col in ['Fecha Registro', 'Fecha de Báscula']:
                     if col in df_filtrado.columns:
-                        df_filtrado[col] = pd.to_datetime(df_filtrado[col], dayfirst=True, errors='coerce')
+                        df_filtrado[col] = pd.to_datetime(
+                            df_filtrado[col], dayfirst=True, errors='coerce'
+                        ).dt.date
 
-                # Cálculo de días en operación o vencimientos basado en la fecha de referencia
-                if 'Fecha de Báscula' in df_filtrado.columns:
-                    fecha_base = df_filtrado['Fecha de Báscula']
-                else:
-                    fecha_base = df_filtrado['Fecha Registro']
-                
-                df_filtrado['Días en Proceso'] = (pd.to_datetime(st.session_state.fecha_ref) - fecha_base).dt.days
+                # Deduplicación (incluye Tipo Ingreso)
+                columnas_dedup = [
+                    col for col in [
+                        'Placa', 'Fecha Registro', 'Compañía Usuaria',
+                        'Número Documento', 'Tránsito', 'Fecha de Báscula',
+                        'Tipo Ingreso'
+                    ] if col in df_filtrado.columns
+                ]
+                df_filtrado = df_filtrado.drop_duplicates(subset=columnas_dedup, keep='first')
 
-                # Formatear las fechas nuevamente a string para una vista amigable
-                for col in ['Fecha Registro', 'Fecha de Báscula']:
-                    if col in df_filtrado.columns:
-                        df_filtrado[col] = df_filtrado[col].dt.strftime('%Y-%m-%d').fillna('')
+                # Cálculo de vencimiento a 5 días hábiles
+                df_filtrado['Límite'] = 5
 
-                st.session_state.df_final_bloqueos = df_filtrado
+                def calcular_vencimiento(row):
+                    fecha_base = (
+                        row['Fecha de Báscula']
+                        if pd.notna(row.get('Fecha de Báscula')) and str(row.get('Fecha de Báscula')) != 'NaT'
+                        else row.get('Fecha Registro')
+                    )
+                    if pd.isna(fecha_base) or str(fecha_base) == 'NaT':
+                        return None
+                    try:
+                        fecha_venc = np.busday_offset(np.datetime64(fecha_base), 5, roll='forward')
+                        return pd.to_datetime(fecha_venc).date()
+                    except Exception:
+                        return None
+
+                df_filtrado['Vencimiento (5 Días Hábiles)'] = df_filtrado.apply(calcular_vencimiento, axis=1)
+
+                def calcular_dias_restantes(fecha_venc):
+                    if pd.isna(fecha_venc) or str(fecha_venc) == 'NaT':
+                        return None
+                    return (fecha_venc - st.session_state.fecha_ref).days
+
+                df_filtrado['Días Restantes'] = df_filtrado['Vencimiento (5 Días Hábiles)'].apply(calcular_dias_restantes)
+
+                # Orden final de columnas
+                orden_columnas = [
+                    'Placa', 'Fecha Registro', 'Compañía Usuaria',
+                    'Tipo Ingreso', 'Número Documento', 'Documento Transporte',
+                    'Tránsito', 'Estado Planilla', 'Fecha de Báscula',
+                    'Límite', 'Vencimiento (5 Días Hábiles)', 'Días Restantes',
+                    'Comentario'
+                ]
+                orden_columnas = [col for col in orden_columnas if col in df_filtrado.columns]
+                df_final = df_filtrado[orden_columnas].copy()
+
+                df_final['Días Restantes'] = (
+                    pd.to_numeric(df_final['Días Restantes'], errors='coerce')
+                    .fillna(0).astype(int)
+                )
+
+                st.session_state.df_final_bloqueos = df_final
                 st.session_state.file_processed = True
                 st.success("✅ Reporte procesado correctamente.")
-        
+
         except Exception as e:
             st.error(f"Error al procesar el archivo: {e}")
 
-    # Mostrar Resultados del Módulo 3
+    # --- VISUALIZACIÓN DE RESULTADOS ---
     if st.session_state.file_processed and st.session_state.df_final_bloqueos is not None:
-        df_show = st.session_state.df_final_bloqueos
-        
-        st.markdown("---")
-        st.subheader("Auditoría de Formularios y Tiempos de Ingreso")
-        
-        col_metric1, col_metric2 = st.columns(2)
-        col_metric1.metric("Total Formularios Procesados", len(df_show))
-        if 'Días en Proceso' in df_show.columns:
-            alertas = len(df_show[df_show['Días en Proceso'] > 5])  # Ejemplo: Más de 5 días
-            col_metric2.metric("Registros con > 5 Días (Posibles Bloqueos)", alertas)
+        df_res = st.session_state.df_final_bloqueos
+
+        # Filtro por Tipo de Ingreso
+        if 'Tipo Ingreso' in df_res.columns:
+            tipos_disponibles = ["TODOS"] + sorted(df_res['Tipo Ingreso'].dropna().unique().tolist())
+            tipo_sel = st.selectbox(
+                "Filtrar por Tipo de Ingreso:",
+                tipos_disponibles,
+                index=0,
+                key="filtro_tipo_bloqueos"
+            )
+            if tipo_sel != "TODOS":
+                df_res = df_res[df_res['Tipo Ingreso'] == tipo_sel]
+
+        # KPIs Ejecutivos
+        dias_series = df_res['Días Restantes']
+        vencidos = (dias_series <= 0).sum()
+        riesgo = ((dias_series >= 1) & (dias_series <= 2)).sum()
+        a_tiempo = (dias_series >= 3).sum()
+
+        st.markdown(
+            f"<p style='font-size: 15px; font-weight: 600; color: #12402A;'>"
+            f"Resumen de Estado Operativo — Fecha de Corte: {st.session_state.fecha_ref.strftime('%d/%m/%Y')}"
+            f"</p>",
+            unsafe_allow_html=True
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Vencidos o Vencen Hoy", int(vencidos))
+        with col2:
+            st.metric("Próximos a Vencer (1-2 días)", int(riesgo))
+        with col3:
+            st.metric("En Plazo (>= 3 días)", int(a_tiempo))
 
         st.markdown("<br>", unsafe_allow_html=True)
-        busqueda = st.text_input("🔍 Buscar por Placa o Documento...", "")
-        df_vista = df_show.copy()
-        if busqueda:
-            mask = df_vista.apply(lambda fila: fila.astype(str).str.contains(busqueda, case=False, na=False).any(), axis=1)
-            df_vista = df_vista[mask]
+        st.markdown(
+            "<p style='font-size: 16px; font-weight: 600; color: #12402A;'>"
+            "Detalle de Registros y Control de Plazos</p>",
+            unsafe_allow_html=True
+        )
 
-        st.dataframe(df_vista, use_container_width=True, height=400)
-        
-        st.markdown("---")
+        def apply_executive_colors(row):
+            try:
+                dias = int(row['Días Restantes'])
+                if dias <= 0:
+                    return ['background-color: #FEE2E2; color: #991B1B; font-weight: 500;'] * len(row)  # Rojo
+                elif 1 <= dias <= 2:
+                    return ['background-color: #FEF3C7; color: #92400E; font-weight: 500;'] * len(row)  # Amarillo
+                elif dias >= 3:
+                    return ['background-color: #ECFDF5; color: #065F46;'] * len(row)  # Verde
+            except Exception:
+                pass
+            return [''] * len(row)
+
+        styled_df = df_res.style.apply(apply_executive_colors, axis=1).format({'Días Restantes': '{:d}'})
+        st.dataframe(styled_df, use_container_width=True, height=450, hide_index=True)
+
+        # --- EXPORTACIÓN ---
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        def convert_df_to_excel(df_styled):
+            try:
+                df_export = df_styled.data
+            except AttributeError:
+                df_export = df_styled
+            return generar_excel_actas(df_export, sheet_name="Control_Bloqueos")
+
+        excel_data = convert_df_to_excel(styled_df)
+
         col_dl1, col_dl2 = st.columns(2)
         with col_dl1:
             st.download_button(
                 "⬇️ Descargar Reporte Excel (.xlsx)",
-                data=generar_excel_actas(df_show, sheet_name="Bloqueos"),
-                file_name=f"control_bloqueos_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                data=excel_data,
+                file_name=f"Control_Bloqueos_{st.session_state.fecha_ref}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="dl_excel_bloqueos"
@@ -738,12 +849,13 @@ def modulo_control_bloqueos():
         with col_dl2:
             st.download_button(
                 "⬇️ Descargar Reporte CSV (.csv)",
-                data=df_show.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
-                file_name=f"control_bloqueos_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                data=df_res.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+                file_name=f"Control_Bloqueos_{st.session_state.fecha_ref}.csv",
                 mime="text/csv",
                 use_container_width=True,
                 key="dl_csv_bloqueos"
             )
+
 
 # ==========================================
 # RUTEO PRINCIPAL (EJECUCIÓN DE MÓDULOS)
